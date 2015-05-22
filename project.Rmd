@@ -1,0 +1,124 @@
+---
+title: "Practical machine learning project"
+output: html_document
+---
+
+### Training set data
+
+The Weight Lifting Exercises dataset was collected by
+
+Ugulino, W.; Cardador, D.; Vega, K.; Velloso, E.; Milidiu, R.; Fuks, H. **Wearable Computing: Accelerometers' Data Classification of Body Postures and Movements**. Proceedings of 21st Brazilian Symposium on Artificial Intelligence. Advances in Artificial Intelligence - SBIA 2012. In: Lecture Notes in Computer Science. , pp. 52-61. Curitiba, PR: Springer Berlin / Heidelberg, 2012. ISBN 978-3-642-34458-9. DOI: 10.1007/978-3-642-34459-6_6. 
+
+We downloaded their dataset of 19622 observations.
+
+```{r, include=FALSE}
+library(RCurl)
+setwd("~/Dropbox/Coursera/data_analysis/machine")
+dat <- read.csv("pml-training.csv", na.strings=c("NA",""), header=TRUE, stringsAsFactors=FALSE)
+```
+```{r, eval=FALSE}
+library(RCurl)
+dat <- read.csv(text=getURL("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"), na.strings=c("NA",""), header=TRUE, stringsAsFactors=FALSE)
+```
+
+We divided these 80:20 into training and test sets. The goal was to create a prediction algorithm for the 'classe' factor variable, which represents the manner in which subjects performed the given exercise.
+
+```{r, warning=FALSE, message=FALSE}
+library(caret)
+set.seed(1)
+testIndex = createDataPartition(dat$classe, p=0.8, list=FALSE)
+training = dat[testIndex, ]
+testing = dat[-testIndex, ]
+```
+
+### Selecting covariates
+
+We wanted to eliminate irrelevant covariates from our predictors. The first 7 columns contained subject and time labels, so we removed these.
+
+```{r}
+head(training[, 1:7], 3)
+training <- training[, 8:160]
+testing <- testing[, 8:160]
+```
+
+The data had been imported variously by read.csv() as integers, numerics or characters. With the exception of the last column containing the 'classe' variable, we converted each column to numeric. The 'classe' variable was converted to a factor.
+
+```{r, warning=FALSE}
+training[, 1:152] <- sapply(training[, 1:152], as.numeric)
+testing[, 1:152] <- sapply(testing[, 1:152], as.numeric)
+training$classe <- as.factor(training$classe)
+testing$classe <- as.factor(testing$classe)
+```
+
+#### NA values
+
+Many of the covariates contained a large number of NA values. In fact, covariates either contained zero NAs or close to 100%.
+
+```{r, echo=FALSE, fig.height=3, fig.width=3}
+hist(colSums(is.na(training)), main='NA values', xlab='Number of NA values per covariate', ylab='Frequency of covariates')
+```
+
+We kept only covariates that did not contain NA values.
+
+```{r}
+columns_to_keep <- colSums(is.na(training)) == 0
+training <- training[, columns_to_keep]
+testing <- testing[, columns_to_keep]
+```
+
+#### Near-zero-variance covariates
+
+We wanted to eliminate any covariates that had near-zero variance. However, after removing covariates with NA values, there were no longer any covariates left with near-zero variance.
+
+```{r, message=FALSE, warning=FALSE}
+nzv <- nearZeroVar(training, saveMetric=TRUE)
+sum(nzv$nzv==TRUE)
+```
+
+### Random forest model
+
+We trained a random forest model
+
+```{r, eval=FALSE}
+modFit <- train(classe ~ ., data=training, method='rf', prox=TRUE)
+```
+```{r, include=FALSE, eval=FALSE}
+saveRDS(modFit, "project_modFit.rds")
+```
+```{r, include=FALSE}
+modFit <- readRDS("project_modFit.rds")
+```
+
+#### Out-of-sample error
+
+This model gave 100% accuracy on the training set, which might indicate overfitting and potentially high variance.
+
+```{r, message=FALSE}
+sum(predict(modFit, training) == training$classe)/nrow(training) * 100
+```
+
+However, cross-validation with our test set containing `r nrow(testing)` observations also gave close to perfect accuracy and almost no out-of-sample error. We were therefore confident in our classification model.
+
+```{r}
+sum(predict(modFit, testing) == testing$classe)/nrow(testing) * 100
+```
+
+### Test cases
+
+We applied our model to the 20 test cases supplied.
+
+```{r}
+testCases <- read.csv(text=getURL("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"))
+answers <- predict(modFit, testCases)
+answers
+```
+```{r, eval=FALSE}
+pml_write_files = function(x){
+  n = length(x)
+  for(i in 1:n){
+    filename = paste0("problem_id_",i,".txt")
+    write.table(x[i],file=filename,quote=FALSE,row.names=FALSE,col.names=FALSE)
+  }
+}
+pml_write_files(answers)
+```
